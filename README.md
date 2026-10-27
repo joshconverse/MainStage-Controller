@@ -165,3 +165,7 @@ fohctl bridge --port 9124 --suffix " (test)" --store /tmp/foh-test   # an isolat
 - Selection: `-strip in/2`, `-sof 3`
 - States: `-import`, `-locked`, `-armed`, `-offline`, `-reorder`, `-toast`
 - Testing: `-e2e`
+
+## License
+
+MIT. See [LICENSE](LICENSE).
