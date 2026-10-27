@@ -1,0 +1,101 @@
+name: FOH
+options:
+  bundleIdPrefix: io.itstudios.foh
+  deploymentTarget:
+    iOS: "17.0"
+    macOS: "14.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+packages:
+  FOHCore:
+    path: Packages/FOHCore
+targets:
+  FOHRemote:
+    type: application
+    platform: iOS
+    sources: [Apps/FOHRemote]
+    dependencies:
+      - package: FOHCore
+        product: FOHCore
+    info:
+      path: Apps/FOHRemote/Info.plist
+      properties:
+        CFBundleDisplayName: FOH Remote
+        LSRequiresIPhoneOS: true
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UIRequiresFullScreen: true
+        UIStatusBarHidden: true
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSLocalNetworkUsageDescription: FOH Remote connects to FOH Bridge on your Mac over the local network.
+        NSBonjourServices:
+          - _fohbridge._tcp
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: io.itstudios.foh.show
+            UTTypeDescription: FOH Remote show
+            UTTypeConformsTo: [public.json]
+            UTTypeTagSpecification:
+              public.filename-extension: [fohshow]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.itstudios.foh.remote
+        TARGETED_DEVICE_FAMILY: "2"
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 575KH62PG3   # the maintainer's Personal Team; set your own team ID to build
+    scheme:
+      testTargets: [FOHRemoteUITests]
+  FOHRemoteUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [Apps/FOHRemoteUITests]
+    dependencies:
+      - target: FOHRemote
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.itstudios.foh.remote.uitests
+        TARGETED_DEVICE_FAMILY: "2"
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 575KH62PG3
+  FOHBridge:
+    type: application
+    platform: macOS
+    sources:
+      - Apps/FOHBridge
+      # The concert writer, run by the MainStage sync (PLAN.md §9c) with /usr/bin/python3.
+      - path: Tools/concert-format/concert_write.py
+        buildPhase: resources
+      - path: Tools/concert-format/keyed_archive.py
+        buildPhase: resources
+    dependencies:
+      - package: FOHCore
+        product: FOHCore
+      - package: FOHCore
+        product: FOHMacKit
+    info:
+      path: Apps/FOHBridge/Info.plist
+      properties:
+        CFBundleDisplayName: FOH Bridge
+        LSUIElement: true
+        NSMicrophoneUsageDescription: FOH Bridge reads your audio interface inputs to show input meters on the iPad.
+        NSAudioCaptureUsageDescription: FOH Bridge listens to MainStage's output to show output meters on the iPad.
+        NSLocalNetworkUsageDescription: FOH Bridge accepts connections from FOH Remote on your iPad.
+        NSBonjourServices:
+          - _fohbridge._tcp
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.itstudios.foh.bridge
+        # Signed with the same Apple Development certificate as the iPad app, so macOS keeps FOH Bridge's
+        # Microphone and System Audio Recording permissions across rebuilds (ad-hoc signing lost them each time).
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 575KH62PG3
+        ENABLE_HARDENED_RUNTIME: NO
+        ENABLE_APP_SANDBOX: NO
+    scheme: {}
