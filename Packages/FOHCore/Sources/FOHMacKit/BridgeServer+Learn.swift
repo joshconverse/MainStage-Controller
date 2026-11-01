@@ -100,6 +100,7 @@ extension BridgeServer {
 
     func commitLearn(_ state: LearnState) {
         learn = state
+        guard readOnlyReason == nil else { return }
         do { try options.store.saveLearn(state) } catch { log("Couldn't save learn state: \(error)") }
         if !connections.isEmpty, let m = try? FOHProtocol.jsonMessage(FOHProtocol.Path.learnState, state) {
             broadcast(.message(m))

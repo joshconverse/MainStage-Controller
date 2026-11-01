@@ -79,6 +79,11 @@ extension BridgeServer {
         if let record = concertSyncRecord {
             mainStageSync.lastRun = record.date
         }
+        // The concert as of the last update is what the show reflects; a save after that is re-read (concert watcher).
+        if let record = concertSyncRecord, record.concertPath == show.concertPath, let date = record.contentDate {
+            concertReadPath = record.concertPath
+            concertReadDate = date
+        }
         guard options.autoSyncMainStage else { return checkMainStageSync() }
         mainStageObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main
@@ -129,17 +134,48 @@ extension BridgeServer {
     func mainStageQuit() {
         guard let path = show.concertPath else { return }
         let saved = ConcertSync.contentDate(of: URL(fileURLWithPath: path))
-        if let saved, saved > (concertSyncRecord?.contentDate ?? .distantPast) {
-            log("MainStage quit after saving \(URL(fileURLWithPath: path).lastPathComponent): re-reading it")
-            mainStageVerifyNext = true
-            mergeConcertInBackground(path: path) { [weak self] ack in
-                self?.log(ack.message)
-                // Hand-made Assign & Maps for pending learns are in the concert now (phase 5).
-                self?.checkPluginLearns { _ in self?.checkMainStageSync() }
-            }
-        } else if mainStageSync.phase == .waiting {
+        if let saved, saved > (concertReadDate ?? .distantPast), !concertRereading {
+            rereadConcert(path, because: "MainStage quit after saving it")
+        } else if mainStageSync.phase == .waiting || mainStageVerifyNext {
             log("MainStage quit: applying the waiting assignment changes")
             checkMainStageSync()
+        }
+    }
+
+    /// Every few seconds (and on Pull): has MainStage saved the concert since the bridge last read it? Once a save
+    /// has settled (MainStage writes several files), re-read it, so plugins and strips added, moved or removed in
+    /// MainStage reach the iPad while MainStage keeps running. Writing assignments still waits for it to quit.
+    /// `now: .distantFuture` skips the settle wait (Pull). Returns true when a re-read started.
+    @discardableResult
+    func watchConcert(now: Date = Date()) -> Bool {
+        guard options.autoSyncMainStage, readOnlyReason == nil, mainStageSync.phase != .running, !concertRereading,
+              let path = show.concertPath, let saved = ConcertSync.contentDate(of: URL(fileURLWithPath: path)) else { return false }
+        guard concertReadPath == path, let known = concertReadDate else {
+            // A concert the bridge hasn't dated yet: take it as read now.
+            concertReadPath = path
+            concertReadDate = saved
+            return false
+        }
+        guard saved > known else { concertChangeSeenAt = nil; return false }
+        let seen = concertChangeSeenAt ?? now
+        if concertChangeSeenAt == nil { concertChangeSeenAt = seen }
+        guard now == .distantFuture || now.timeIntervalSince(seen) >= options.concertSettleDelay else { return false }
+        rereadConcert(path, because: "MainStage saved it")
+        return true
+    }
+
+    /// Re-read the concert into the show (as Import does), then finish any learns it now maps and recheck the sync.
+    func rereadConcert(_ path: String, because why: String) {
+        concertRereading = true
+        concertChangeSeenAt = nil
+        mainStageVerifyNext = true   // MainStage wrote the concert: the next update checks it even if the show looks the same
+        log("\(URL(fileURLWithPath: path).lastPathComponent): \(why); re-reading it")
+        mergeConcertInBackground(path: path) { [weak self] ack in
+            guard let self else { return }
+            self.log(ack.message)
+            self.concertRereading = false
+            // Hand-made Assign & Maps for pending learns are in the concert now (phase 5).
+            self.checkPluginLearns { _ in self.checkMainStageSync() }
         }
     }
 
@@ -149,6 +185,11 @@ extension BridgeServer {
         mainStageSyncWork?.cancel()
         if let completion { mainStageSyncWaiters.append(completion) }
         guard mainStageSync.phase != .running else { return }
+        if let reason = readOnlyReason {
+            mainStageSyncWaiters.forEach { $0(.fail(reason)) }
+            mainStageSyncWaiters = []
+            return
+        }
         func finish(_ ack: BridgeAck) {
             let waiters = mainStageSyncWaiters
             mainStageSyncWaiters = []
@@ -191,6 +232,9 @@ extension BridgeServer {
                                                    date: Date(), contentDate: contentDate)
                     do { try self.options.store.saveConcertSync(record) } catch { self.log("Couldn't save the sync record: \(error)") }
                     self.concertSyncRecord = record
+                    // The bridge's own write isn't a MainStage save: the watcher shouldn't re-read it.
+                    self.concertReadPath = path
+                    self.concertReadDate = contentDate
                     self.mainStageVerifyNext = false
                     self.mainStageSync.phase = .idle
                     self.mainStageSync.lastReport = report

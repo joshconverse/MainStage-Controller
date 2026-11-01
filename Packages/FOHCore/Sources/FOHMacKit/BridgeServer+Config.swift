@@ -163,7 +163,9 @@ extension BridgeServer {
     }
 
     func commitBindingChange() {
-        do { try options.store.saveOverrides(overrides) } catch { log("Couldn't save overrides: \(error)") }
+        if readOnlyReason == nil {
+            do { try options.store.saveOverrides(overrides) } catch { log("Couldn't save overrides: \(error)") }
+        }
         saveShow()
         broadcastConfig()
     }
@@ -276,6 +278,9 @@ extension BridgeServer {
 
     private func adoptConcert(_ info: ConcertInfo) -> BridgeAck {
         let name = URL(fileURLWithPath: info.path).lastPathComponent
+        // What was just read: the concert watcher re-reads only saves newer than this.
+        concertReadPath = info.path
+        concertReadDate = ConcertSync.contentDate(of: URL(fileURLWithPath: info.path))
         snapshot("Before concert merge (\(name))")
         let before = Set(show.strips.map(\.ref))
         let merged = show.merged(with: info)
@@ -390,7 +395,10 @@ extension BridgeServer {
         }
         sendProgramChange(pc)
         log("Pull: re-selected \(show.patches[index].name) (PC \(pc)) — MainStage re-sends mapped values")
-        return .ok("Re-selected \(show.patches[index].name) — MainStage re-sends its mapped values")
+        // Plugins and strips come from the concert file, not from MIDI: re-read it if MainStage saved it since.
+        let reread = watchConcert(now: .distantFuture)
+        return .ok("Re-selected \(show.patches[index].name) — MainStage re-sends its mapped values"
+                   + (reread ? " · re-reading the concert MainStage saved" : ""))
     }
 
     func sendProgramChange(_ program: Int) {

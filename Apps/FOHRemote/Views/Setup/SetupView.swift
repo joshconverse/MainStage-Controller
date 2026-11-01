@@ -179,7 +179,7 @@ struct ConnectionView: View {
                                 .disabled(!store.connection.isConnected)
                             Spacer()
                         }
-                        Text("Pull re-selects the current patch so MainStage re-sends every mapped value (needs “Send Value to”). Push overwrites MainStage with the bridge’s cached values.")
+                        Text("Pull re-selects the current patch so MainStage re-sends every mapped value (needs “Send Value to”), and re-reads the concert if MainStage saved it. Plugins and strips come from the saved concert: FOH Bridge re-reads it a few seconds after each save. Push overwrites MainStage with the bridge’s cached values.")
                             .font(.system(size: 11)).foregroundStyle(Theme.text3)
                         if let sync = store.status?.mainStageSync {
                             HStack(spacing: 10) {

@@ -37,6 +37,11 @@ codesign --verify --deep --strict "$SRC"
 stop_bridge
 rm -rf "$DEST"
 ditto "$SRC" "$DEST"
+# Only the installed copy should be launchable: a build left registered can be opened from Spotlight or Launchpad,
+# and an old build can't read a newer show (it would start from its built-in one).
+LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+"$LSREGISTER" -u "$(cd "$SRC" && pwd)" 2>/dev/null || true
+mkdir -p build && touch build/.metadata_never_index   # and keep Spotlight out of the build folder
 
 mkdir -p "$(dirname "$PLIST")"
 cat > "$PLIST" <<PLIST

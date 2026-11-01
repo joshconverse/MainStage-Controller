@@ -44,6 +44,8 @@ public final class BridgeServer {
         public var concertWriter: URL?
         /// How long show changes must settle before an automatic update.
         public var mainStageSyncDelay: TimeInterval = 3
+        /// How long a MainStage save must settle (it writes several files) before the bridge re-reads the concert.
+        public var concertSettleDelay: TimeInterval = 2
         public var isMainStageRunning: () -> Bool = { RunningApps.pid(bundleID: ConcertSync.mainStageBundleID) != nil }
         /// MainStage's parameter tables for its own plugins (`MainStagePluginCatalog.description(named:)`). The app and
         /// fohctl's bridge read them; tests leave it off unless they're testing it.
@@ -95,6 +97,9 @@ public final class BridgeServer {
     public internal(set) var startupWarnings: [String] = []
     /// The MainStage assignment sync (menu, `/foh/status`).
     public internal(set) var mainStageSync = MainStageSyncState()
+    /// Set when the saved show is from a newer FOH Bridge: this one then saves nothing, so it can't drop what it
+    /// doesn't understand. Shown in the menu.
+    public internal(set) var readOnlyReason: String?
 
     // MARK: Internals
 
@@ -152,6 +157,13 @@ public final class BridgeServer {
     /// MainStage saved the concert since our last update: run the writer once even if the show looks unchanged.
     @ObservationIgnored var mainStageVerifyNext = false
     @ObservationIgnored var discoveryFinishedOnce = false
+    /// The concert's newest file date when the bridge last read it (or wrote it), the path it was for, and when a
+    /// newer save was first seen (re-read once it settles).
+    @ObservationIgnored var concertReadDate: Date?
+    @ObservationIgnored var concertReadPath: String?
+    @ObservationIgnored var concertChangeSeenAt: Date?
+    @ObservationIgnored var concertRereading = false
+    @ObservationIgnored var tickCount = 0
 
     static let echoWindow: TimeInterval = 0.3
     /// A client-set value with no MainStage echo after this long is no longer "confirmed".
@@ -173,6 +185,12 @@ public final class BridgeServer {
         self.learn = state.learn
         self.overrides = state.overrides
         self.startupWarnings = state.warnings
+        if state.show.formatVersion > ShowConfig.currentFormatVersion {
+            let reason = "Your show was saved by a newer FOH Bridge (format \(state.show.formatVersion)). This one is older, so it "
+                + "won't save anything. Quit it and open /Applications/FOH Bridge.app."
+            self.readOnlyReason = reason
+            self.startupWarnings.append(reason)
+        }
         self.inputDeviceUID = MIDIEngine.sharedDefaults.string(forKey: Self.inputDeviceKey + options.portNameSuffix)
         self.backupIndex = options.store.loadBackupIndex()
         self.backups = backupIndex.map(\.info)
@@ -858,6 +876,8 @@ public final class BridgeServer {
 
     /// Once a second: counters, meter status, silent-client cleanup, unechoed values.
     private func tick() {
+        tickCount += 1
+        if tickCount % 3 == 0 { watchConcert() }
         refreshCounts()
         let now = Date()
         for conn in connections.values where now.timeIntervalSince(conn.lastActivity) > options.clientTimeout {
@@ -916,7 +936,10 @@ public final class BridgeServer {
     }()
 
     func saveShow() {
-        do { try options.store.saveShow(show) } catch { log("Couldn't save show: \(error)") }
+        guard readOnlyReason == nil else { return }
+        var current = show
+        current.formatVersion = ShowConfig.currentFormatVersion
+        do { try options.store.saveShow(current) } catch { log("Couldn't save show: \(error)") }
         checkMainStageSync()
     }
 
@@ -942,6 +965,7 @@ public final class BridgeServer {
         saveValuesWork?.cancel()
         saveValuesWork = nil
         valuesDirtySince = nil
+        guard readOnlyReason == nil else { return }
         do { try options.store.saveValues(values) } catch { log("Couldn't save values: \(error)") }
     }
 }

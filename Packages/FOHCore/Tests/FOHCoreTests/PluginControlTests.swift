@@ -208,6 +208,9 @@ final class PluginControlTests: XCTestCase {
         XCTAssertEqual(back.pluginControls, show.pluginControls)
         XCTAssertEqual(back.pluginSelections, show.pluginSelections)
         let old = #"{"name":"Old","strips":[]}"#
-        XCTAssertTrue(try JSONDecoder().decode(ShowConfig.self, from: Data(old.utf8)).pluginControls.isEmpty)
+        let decoded = try JSONDecoder().decode(ShowConfig.self, from: Data(old.utf8))
+        XCTAssertTrue(decoded.pluginControls.isEmpty)
+        XCTAssertEqual(decoded.formatVersion, 1, "shows from before the field")
+        XCTAssertEqual(back.formatVersion, ShowConfig.currentFormatVersion)
     }
 }

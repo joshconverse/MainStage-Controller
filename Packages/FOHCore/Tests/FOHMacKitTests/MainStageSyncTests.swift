@@ -254,6 +254,82 @@ final class MainStageSyncTests: XCTestCase {
         XCTAssertNil(server.pendingConfirm[path], "Push all never sends Record (it could stop a recording)")
     }
 
+    /// MainStage saves the concert while it keeps running: the bridge re-reads it once the save settles, so plugins
+    /// added in MainStage reach the iPad without quitting it. Pull re-reads at once.
+    func testReReadsTheConcertWhenMainStageSavesIt() throws {
+        let concert = try copyOfFixture()
+        var options = BridgeServer.Options()
+        options.store = BridgeStore(directory: directory.appendingPathComponent("store"))
+        options.discoverPlugins = false
+        options.enableMeters = false
+        options.autoSyncMainStage = true
+        options.concertWriter = Self.writer
+        options.mainStageSyncDelay = 0.01
+        options.concertSettleDelay = 0
+        options.isMainStageRunning = { true }
+        let server = BridgeServer(options: options)
+        defer { server.stopMainStageSync() }
+        server.show.concertPath = concert.path
+        server.startMainStageSync()
+        XCTAssertFalse(server.watchConcert(), "first look: the concert as it is now counts as read")
+        func vrb() -> Strip? { server.show.strips.first { $0.mainStage?.stripName == "VRB Return" } }
+        XCTAssertNil(vrb(), "the built-in show, not yet this concert")
+
+        func save(_ seconds: TimeInterval) throws {   // as MainStage does: rewrite a file inside the bundle
+            let file = concert.appendingPathComponent("Concert.patch/data.plist")
+            try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(seconds)], ofItemAtPath: file.path)
+        }
+        try save(5)
+        XCTAssertTrue(server.watchConcert())
+        waitUntil(10) { vrb() != nil }
+        XCTAssertEqual(vrb()?.plugins.map(\.name), ["Channel EQ", "Pro-R 2"], "VRB Return and its plugins, from the save")
+        waitUntil(5) { server.mainStageSync.phase == .waiting }
+        XCTAssertEqual(server.mainStageSync.phase, .waiting, "assignments still wait for MainStage to quit")
+        XCTAssertFalse(server.watchConcert(), "nothing new since the re-read")
+
+        // Pull: re-reads a newer save straight away.
+        try save(10)
+        let pull = server.pullFromMainStage()
+        XCTAssertTrue(pull.ok, pull.message)
+        XCTAssertTrue(pull.message.contains("re-reading the concert"), pull.message)
+    }
+
+    /// A bridge older than the one that saved the show (an old build launched by mistake) saves nothing over it.
+    func testOlderBridgeWontSaveOverANewerShow() throws {
+        let store = BridgeStore(directory: directory.appendingPathComponent("store"))
+        var newer = ShowConfig.church
+        newer.name = "From the future"
+        newer.formatVersion = ShowConfig.currentFormatVersion + 1
+        try store.saveShow(newer)
+        let before = try Data(contentsOf: store.showURL)
+
+        var options = BridgeServer.Options()
+        options.store = store
+        options.discoverPlugins = false
+        options.enableMeters = false
+        options.concertWriter = Self.writer
+        options.isMainStageRunning = { false }
+        let server = BridgeServer(options: options)
+        XCTAssertNotNil(server.readOnlyReason)
+        XCTAssertTrue(server.startupWarnings.contains { $0.contains("newer FOH Bridge") })
+        var edited = server.show
+        edited.name = "Edited here"
+        server.applyConfig(edited, from: "test")
+        server.flushValues()
+        XCTAssertEqual(try Data(contentsOf: store.showURL), before, "show.json untouched")
+        XCTAssertNil(server.snapshot("test", dedupe: false))
+        var ack: BridgeAck?
+        server.updateMainStage(trigger: "test") { ack = $0 }
+        XCTAssertEqual(ack?.ok, false)
+
+        // A show at this bridge's format (or older) is saved, stamped with the current format.
+        var options2 = options
+        options2.store = BridgeStore(directory: directory.appendingPathComponent("store2"))
+        let current = BridgeServer(options: options2)
+        current.saveShow()
+        XCTAssertEqual(options2.store.loadShow()?.formatVersion, ShowConfig.currentFormatVersion)
+    }
+
     func testManualUpdateRefusesWhileMainStageRuns() throws {
         let concert = try copyOfFixture()
         var options = BridgeServer.Options()

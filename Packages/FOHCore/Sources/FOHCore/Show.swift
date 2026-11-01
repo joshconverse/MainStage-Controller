@@ -167,6 +167,12 @@ public struct ShowConfig: Codable, Hashable, Sendable {
     public var learnedParameters: [String: [LearnedParameter]] = [:]
     /// Controls waiting for their hand-made Assign & Map in MainStage.
     public var pendingLearns: [PendingLearn] = []
+    /// The show format this was written in (1 for shows from before the field). A bridge that finds a newer format
+    /// than it knows won't save over it: an old build would drop what it can't read (plugin controls, learns…).
+    public var formatVersion: Int = ShowConfig.currentFormatVersion
+
+    /// 2: plugin controls, selections and learned parameters (PLAN.md §9c).
+    public static let currentFormatVersion = 2
 
     public init(name: String, strips: [Strip], sends: [SendBus], bindings: [String: StripBinding] = [:],
                 patches: [PatchInfo] = [], currentPatch: Int? = nil, concertPath: String? = nil,
@@ -188,7 +194,7 @@ public struct ShowConfig: Codable, Hashable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case name, strips, sends, bindings, patches, currentPatch, concertPath, faderCalibration, stripOrder, customTemplates
-        case pluginControls, pluginSelections, learnedParameters, pendingLearns
+        case pluginControls, pluginSelections, learnedParameters, pendingLearns, formatVersion
     }
 
     /// Tolerates show files written before newer fields existed.
@@ -208,6 +214,7 @@ public struct ShowConfig: Codable, Hashable, Sendable {
         pluginSelections = try c.decodeIfPresent([String: PluginSelection].self, forKey: .pluginSelections) ?? [:]
         learnedParameters = try c.decodeIfPresent([String: [LearnedParameter]].self, forKey: .learnedParameters) ?? [:]
         pendingLearns = try c.decodeIfPresent([PendingLearn].self, forKey: .pendingLearns) ?? []
+        formatVersion = try c.decodeIfPresent(Int.self, forKey: .formatVersion) ?? 1
     }
 
     /// Strips of one kind in the user's display order (then slot order for anything not placed).

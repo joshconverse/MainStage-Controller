@@ -41,6 +41,7 @@ extension BridgeServer {
     /// Save a snapshot. With `dedupe`, nothing is written when the newest snapshot has the same content.
     @discardableResult
     func snapshot(_ reason: String, dedupe: Bool = true) -> BackupInfo? {
+        guard readOnlyReason == nil else { return nil }
         let bundle = exportBundle(reason: reason)
         let hash = Self.contentHash(bundle)
         if dedupe, let latest = backupIndex.first, latest.contentHash == hash { return nil }
