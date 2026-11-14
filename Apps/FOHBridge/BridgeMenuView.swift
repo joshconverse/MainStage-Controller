@@ -82,6 +82,11 @@ struct BridgeMenuView: View {
                     }
                 }
             }
+            // Free-team signing lasts 7 days; Tools/refresh-ipad.sh --enable lets the bridge renew it.
+            if let refresh = { _ = server.iPadRefreshSummaryVersion; return server.iPadRefreshSummary }() {
+                Text("FOH Remote on iPad: \(refresh)")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -172,6 +177,8 @@ struct BridgeMenuView: View {
             Text("Input tap: \(inputTapSummary)")
                 .font(.caption).foregroundStyle(server.status.inputWaitingFor == nil ? Color.secondary : Color.orange)
             Text("Output tap: \(server.status.outputTap ?? "off — MainStage not running, or System Audio Recording not allowed")")
+                .font(.caption).foregroundStyle(.secondary)
+            Text("FOH Meter plugin: \(server.status.pluginMeters?.joined(separator: ", ") ?? "none sending — insert FOH Meter on a strip (e.g. an FX return)")")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }

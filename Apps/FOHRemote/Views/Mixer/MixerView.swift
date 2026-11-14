@@ -84,7 +84,7 @@ struct MixerSidebar: View {
                     .overlay(RoundedRectangle(cornerRadius: 9).stroke(Theme.line))
             }
             .buttonStyle(.plain)
-            Text("Meters: inputs pre-fader (Bridge input tap) · outputs (MainStage tap)")
+            Text("Meters: inputs pre-fader (Bridge input tap) · FX returns (FOH Meter plugin) · outputs (MainStage tap)")
                 .font(.system(size: 10)).foregroundStyle(Theme.text3).padding(.horizontal, 2)
         }
     }

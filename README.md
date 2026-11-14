@@ -12,7 +12,7 @@
 
 - **Mixer**
   - Strips grouped as inputs, FX returns and outputs.
-  - Each strip has meters (input via the bridge, outputs via a MainStage tap), a mini EQ, G/C/insert badges, pan, mute/solo and a fader.
+  - Each strip has meters (input via the bridge, FX returns via the FOH Meter plugin, outputs via a MainStage tap), a mini EQ, G/C/insert badges, pan, mute/solo and a fader.
   - Sends-on-faders, a guarded master (hold to arm), click and tempo.
 - **Channel**
   - **EQ**: built from the strip's binding (SSL bands for Lead vox and Guitar), with an RTA overlay.
@@ -43,6 +43,7 @@
 - **Damaged state files:** if `show.json`, `values.json`, `learn.json` or `overrides.json` won't read at launch, the bridge keeps the file (renamed `*.unreadable-<date>.json`), restores that part from the newest backup and shows a warning at the top of the menu. It never silently starts over and saves the default over your show.
 - Setlist (Program Change on FOH Global) and Pull from MainStage.
 - Input metering, the MainStage output tap and RTA. Outputs are metered per channel of MainStage's output device, so Output 1/2 get their own meters.
+- **FX return meters** come from **FOH Meter** (`Apps/FOHMeter`), a pass-through Audio Unit you insert in MainStage. An aux return has no interface input or output of its own, so only something inside MainStage can measure it. While MainStage plays, the plugin sends its strip's peak and RMS to the bridge (UDP on 127.0.0.1:9009, about 25 times a second). The bridge matches it to a strip by the MainStage channel strip name. A strip with FOH Meter on it shows that meter instead of its hardware one, so it also works on any other strip you want metered after its plugins.
 - Input meters follow the interface. Plug in or unplug the chosen device (e.g. the Scarlett) and the meters switch within about half a second. While it's unplugged they read nothing and the menu, `fohctl sync` and the iPad's Connection screen say "waiting for Scarlett 2i2 USB". They never fall back to the built-in mic. With "System default input" they follow macOS's default input.
 - **Learn HUD**, a floating panel with hotkeys: ⌃⌥Space sends the sweep, ⌃⌥→ marks it learned and moves on, ⌃⌥← goes back.
 
@@ -58,6 +59,7 @@ Packages/FOHCore/          Swift package
   Tests/FOHCoreTests/      unit tests (incl. real SSL Channel / Waves Tune discovery fixtures)
   Tests/FOHMacKitTests/    concert parser (Church.concert fixture), bridge, audio DSP tests
 Apps/FOHBridge/            macOS menu-bar app (wraps BridgeServer, Learn HUD)
+Apps/FOHMeter/             FOH Meter, the metering Audio Unit for MainStage (plain C, AUv2)
 Apps/FOHRemote/            iPad app (SwiftUI)
 Apps/FOHRemoteUITests/     XCUITest: real taps/drags, offline or against a live bridge
 project.yml                XcodeGen spec → FOH.xcodeproj (generated, not committed)
@@ -93,6 +95,14 @@ Tools/install-bridge.sh
 
 Without them, everything still works, just without meters. Pick the audio interface once in the menu's **Input** picker; the bridge remembers it and picks it up whenever it's plugged in.
 
+**FX return meters:** install FOH Meter, then in MainStage insert **Audio Units › FOH Remote › FOH Meter** as the last
+plugin on each FX return (e.g. VRB Return) and save the concert. The bridge menu and the iPad's Connection screen list the
+strips it hears from. Run the script again after changing the plugin, and bump its `version` in `project.yml`.
+
+```bash
+Tools/install-meter.sh
+```
+
 **On your iPad Air 13":**
 
 1. Sign Xcode in to your Apple ID. A free Personal Team works: put its team ID in `project.yml` (`DEVELOPMENT_TEAM`), then run `xcodegen generate`. `xcrun devicectl list devices` shows your iPad's UDID for the commands below.
@@ -115,8 +125,20 @@ Without them, everything still works, just without meters. Pick the audio interf
 5. Allow **Local Network** when asked. With the iPad on the same Wi-Fi as the Mac, it finds the bridge over Bonjour.
 6. If the Mac firewall asks about FOHBridge, allow incoming connections.
 
-With a free Personal Team the install stops opening after 7 days; run step 3 again. After the first cable install,
-`devicectl` also reaches the iPad over Wi-Fi.
+**Keeping it installed:** with a free Personal Team, iOS stops opening the app 7 days after it was signed. That's
+Apple's limit; a paid Developer Program membership ($99/year) makes it a year. The refresh script rebuilds the app with
+a fresh 7-day profile and reinstalls it over Wi-Fi (`devicectl` reaches the iPad wirelessly after the first cable
+install). Your settings on the iPad are kept.
+
+```bash
+Tools/refresh-ipad.sh --enable
+```
+
+After that, FOH Bridge runs `Tools/refresh-ipad.sh --if-due` every 2 hours. It renews once under 4 days are left,
+never while FOH Remote is connected, and not while MainStage is running unless under 12 hours are left. The first time,
+macOS asks whether FOH Bridge may access your Documents folder (the project lives there); allow it. The menu shows when
+the app expires and the last result. If it can't renew within the last day, a notification says why (usually that the
+iPad is asleep or on another network). `Tools/refresh-ipad.sh` renews right away, and `--status` shows where it stands.
 
 **First-time setup:**
 

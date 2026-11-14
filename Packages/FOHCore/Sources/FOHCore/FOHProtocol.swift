@@ -8,6 +8,8 @@ public enum FOHProtocol {
     public static let version: Int32 = 1
     public static let bonjourType = "_fohbridge._tcp"
     public static let defaultPort: UInt16 = 9000
+    /// UDP port on 127.0.0.1 where FOH Bridge hears the FOH Meter plugin (`PluginMeterPacket`).
+    public static let pluginMeterPort: UInt16 = 9009
 
     public enum Path {
         /// client → bridge: `,s clientName ,i protocolVersion`
@@ -111,6 +113,8 @@ public enum FOHProtocol {
         public static let rtaSubscribe = "/foh/rta/subscribe"
         /// bridge → client: `,s stripKey ,b bands` (see `RTAFrame`) at ~15 Hz.
         public static let rta = "/foh/rta"
+        /// FOH Meter plugin → bridge, over UDP on `pluginMeterPort` (see `PluginMeterPacket`).
+        public static let pluginMeter = "/foh/meter/plugin"
 
         // MARK: Plugin controls (PLAN.md §9c)
 
@@ -213,6 +217,8 @@ public struct BridgeStatus: Codable, Hashable, Sendable {
     public var inputWaitingFor: String?
     /// "MainStage" while the output process tap is running, nil if it isn't (not running / no permission).
     public var outputTap: String?
+    /// Names of the strips whose FOH Meter plugin is sending levels right now (nil from older bridges).
+    public var pluginMeters: [String]?
     /// Average MainStage echo round trip, once feedback has been seen.
     public var echoRTTms: Double?
     /// The MainStage assignment sync in one line ("Up to date · checked 9:41", "3 changes waiting — quit MainStage

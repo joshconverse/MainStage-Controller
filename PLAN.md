@@ -251,6 +251,14 @@ Built since Phase 3: backups, custom templates, display order, acknowledgements,
    and which strip lights up: output strips share the Scarlett's two physical outputs.
 4. **MainStage-side checks:** S2 (are on/off controls absolute?) and S4 (do meters stream?).
 5. **Follow-ups:** real GR meters (SSL `CompAttn`, if S4 says meters stream), snapshots/scenes, Apple Pencil fine control.
+6. **FX return meters (2026-11-14):** FOH Meter, a pass-through AUv2 in `Apps/FOHMeter`. MainStage isn't sandboxed and
+   sets each plugin's `kAudioUnitProperty_ContextName` to its channel strip's name, so the plugin sends
+   `/foh/meter/plugin` over UDP to 127.0.0.1:9009 and the bridge maps it by name, falling back to the only strip with
+   FOH Meter in its chain. The levels ride in a trailer on `/foh/meters` that older iPads ignore. It passes `auval`.
+   Still to check live: the exact context name MainStage gives (the bridge logs it).
+7. **Free-team signing (2026-11-14):** `Tools/refresh-ipad.sh` renews the 7-day profile (deleting the cached profile
+   makes Xcode issue a fresh one) and reinstalls over Wi-Fi. FOH Bridge runs it, because a LaunchAgent can't read
+   ~/Documents.
 
 ## 9c. Plugin controls (plan, 2026-10-25)
 

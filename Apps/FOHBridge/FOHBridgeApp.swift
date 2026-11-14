@@ -16,6 +16,8 @@ struct FOHBridgeApp: App {
         var options = BridgeServer.Options()
         options.onLog = { LogFile.append($0) }
         options.autoSyncMainStage = true
+        options.pluginMeterPort = FOHProtocol.pluginMeterPort
+        options.renewsIPadApp = true
         options.concertWriter = Bundle.main.url(forResource: "concert_write", withExtension: "py")
         options.mainStageCatalog = MainStagePluginCatalog.description(named:)
         let server = BridgeServer(options: options)
