@@ -124,7 +124,7 @@ func printConcert(_ info: ConcertInfo) {
 }
 
 let bridgeCommands: [Command] = [
-    Command(name: "bridge", usage: "[--seconds N] [--port P] [--suffix S] [--store DIR] [--no-discovery] [--no-meters|--fake-meters]   run the bridge headless") { args in
+    Command(name: "bridge", usage: "[--seconds N] [--port P] [--suffix S] [--store DIR] [--no-discovery] [--no-meters|--fake-meters] [--plugin-meter-port P]   run the bridge headless (FOH Meter on UDP 9009 unless --suffix)") { args in
         lineBufferStdout()
         var opts = BridgeServer.Options()
         opts.onLog = { print($0) }
@@ -136,6 +136,9 @@ let bridgeCommands: [Command] = [
         if args.contains("--no-meters") { opts.enableMeters = false }
         if args.contains("--fake-meters") { opts.meterSourceFactory = { FakeMeterSource() } }
         if !opts.portNameSuffix.isEmpty { opts.advertiseBonjour = false }
+        // A test bridge (--suffix) never takes the FOH Meter port from the real one unless asked.
+        opts.pluginMeterPort = option("--plugin-meter-port", in: args).flatMap(UInt16.init)
+            ?? (opts.portNameSuffix.isEmpty ? FOHProtocol.pluginMeterPort : nil)
         let server = BridgeServer(options: opts)
         try server.start()
         signal(SIGINT, SIG_IGN)
@@ -214,7 +217,7 @@ let bridgeCommands: [Command] = [
             for p in status.ports { print("  \(p.name): sent \(p.sent), received \(p.received)\(p.feedbackSeen ? ", feedback ✓" : "")") }
             print("  plugins: \(status.discoveredPlugins.joined(separator: ", "))")
             let input = status.inputWaitingFor.map { "waiting for \($0)" } ?? "\(status.inputDevice ?? "none") (\(status.inputChannelCount ?? 0) ch)"
-            print("  meters: input \(input) · output tap \(status.outputTap ?? "off")\(status.echoRTTms.map { String(format: " · echo %.1f ms", $0) } ?? "")")
+            print("  meters: input \(input) · output tap \(status.outputTap ?? "off") · FOH Meter \(status.pluginMeters?.joined(separator: ", ") ?? "none")\(status.echoRTTms.map { String(format: " · echo %.1f ms", $0) } ?? "")")
         }
     },
     Command(name: "concert", usage: "[path]   parse a .concert locally and print what the bridge would import") { args in

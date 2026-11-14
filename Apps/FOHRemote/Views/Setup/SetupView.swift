@@ -223,6 +223,7 @@ struct ConnectionView: View {
                                 statusItem("Input meters", status.inputDevice.map { "\($0)\(status.inputChannelCount.map { " · \($0) in" } ?? "")" }
                                            ?? status.inputWaitingFor.map { "waiting for \($0)" } ?? "no input device")
                                 statusItem("Output tap", status.outputTap ?? "not running")
+                                statusItem("FOH Meter plugin", status.pluginMeters?.joined(separator: ", ") ?? "none")
                                 statusItem("Echo round trip", status.echoRTTms.map { String(format: "%.1f ms", $0) } ?? "no feedback yet")
                             }
                             ForEach(status.ports, id: \.name) { p in

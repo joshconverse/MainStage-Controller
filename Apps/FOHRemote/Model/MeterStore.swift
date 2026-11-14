@@ -16,15 +16,18 @@ final class MeterStore {
     private(set) var rta: RTAFrame?
     private(set) var inputHold: [UInt8] = []
     private(set) var outputHold: [UInt8] = []
+    private(set) var stripHold: [String: [UInt8]] = [:]
 
     /// Strip key whose RTA the demo generator should produce (live RTA comes from the bridge).
     @ObservationIgnored var demoRTAStrip: String?
     @ObservationIgnored private var inputHoldAt: [Date] = []
     @ObservationIgnored private var outputHoldAt: [Date] = []
+    @ObservationIgnored private var stripHoldAt: [String: [Date]] = [:]
     @ObservationIgnored private var demoTimer: Timer?
     @ObservationIgnored private var demoPhase = 0.0
     @ObservationIgnored private var demoInputs = 0
     @ObservationIgnored private var demoOutputs = 0
+    @ObservationIgnored private var demoFXReturns: [Strip] = []
     @ObservationIgnored private var demoRTABands: [Double] = []
 
     var isDemoRunning: Bool { demoTimer != nil }
@@ -34,6 +37,15 @@ final class MeterStore {
         let now = Date()
         Self.stepHold(&inputHold, &inputHoldAt, f.inputPeak, now)
         Self.stepHold(&outputHold, &outputHoldAt, f.outputPeak, now)
+        var holds = stripHold.filter { f.strips[$0.key] != nil }
+        for (key, levels) in f.strips {
+            var hold = holds[key] ?? [], at = stripHoldAt[key] ?? []
+            Self.stepHold(&hold, &at, levels.peak, now)
+            holds[key] = hold
+            stripHoldAt[key] = at
+        }
+        stripHold = holds
+        stripHoldAt = stripHoldAt.filter { holds[$0.key] != nil }
     }
 
     func updateRTA(_ r: RTAFrame) { rta = r }
@@ -41,8 +53,8 @@ final class MeterStore {
     func clear() {
         frame = MeterFrame()
         rta = nil
-        inputHold = []; outputHold = []
-        inputHoldAt = []; outputHoldAt = []
+        inputHold = []; outputHold = []; stripHold = [:]
+        inputHoldAt = []; outputHoldAt = []; stripHoldAt = [:]
     }
 
     private static func stepHold(_ hold: inout [UInt8], _ at: inout [Date], _ peaks: [UInt8], _ now: Date) {
@@ -55,9 +67,19 @@ final class MeterStore {
 
     private static func frac(_ a: [UInt8], _ i: Int) -> Double { i < a.count ? MeterScale.fraction(a[i]) : 0 }
 
-    /// One level per channel for a strip (hardware inputs for inputs, MainStage outputs for outputs);
-    /// nil when the strip has no meter source (FX returns, unrouted outputs).
+    /// One level per channel for a strip: its FOH Meter plugin if it has one (that's how FX returns get meters),
+    /// else hardware inputs for inputs and MainStage outputs for outputs; nil when the strip has no meter source.
     func levels(for strip: Strip) -> [Level]? {
+        if let levels = frame.strips[strip.id] {
+            let hold = stripHold[strip.id] ?? []
+            return levels.peak.indices.map {
+                Level(peak: Self.frac(levels.peak, $0), rms: Self.frac(levels.rms, $0), hold: Self.frac(hold, $0))
+            }
+        }
+        return hardwareLevels(for: strip)
+    }
+
+    private func hardwareLevels(for strip: Strip) -> [Level]? {
         let inCh = strip.hardwareInputChannels
         if !inCh.isEmpty {
             return inCh.map { Level(peak: Self.frac(frame.inputPeak, $0), rms: Self.frac(frame.inputRMS, $0), hold: Self.frac(inputHold, $0)) }
@@ -80,9 +102,11 @@ final class MeterStore {
         }
     }
 
-    /// Peak dBFS for a strip (loudest channel), for the estimated-GR meter.
+    /// Peak dBFS for a strip (loudest channel), for the estimated-GR meter. Inputs read their hardware input, which
+    /// is what the compressor sees; a FOH Meter plugin may sit after it.
     func peakDB(for strip: Strip) -> Double? {
-        guard let l = levels(for: strip), let maxPeak = l.map(\.peak).max(), maxPeak > 0 else { return nil }
+        let source = strip.hardwareInputChannels.isEmpty ? levels(for: strip) : hardwareLevels(for: strip)
+        guard let l = source, let maxPeak = l.map(\.peak).max(), maxPeak > 0 else { return nil }
         return MeterScale.floorDB + maxPeak * -MeterScale.floorDB
     }
 
@@ -92,6 +116,7 @@ final class MeterStore {
     func startDemo(_ config: ShowConfig) {
         demoInputs = (config.strips.flatMap(\.hardwareInputChannels).max() ?? -1) + 1
         demoOutputs = max((config.strips.flatMap(\.hardwareOutputChannels).max() ?? -1) + 1, 2)
+        demoFXReturns = config.strips.filter { $0.ref.kind == .fx }
         guard demoTimer == nil else { return }
         demoTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 25, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.demoTick() }
@@ -115,7 +140,13 @@ final class MeterStore {
         let inBases = [-17.0, -21, -24, -26]
         let ins = (0..<demoInputs).map { level(inBases[$0 % inBases.count], 1.3 + Double($0) * 0.4, Double($0)) }
         let outs = (0..<demoOutputs).map { level(-14, 0.9, Double($0) * 0.3) }
-        update(MeterFrame(inputPeak: ins.map(\.0), inputRMS: ins.map(\.1), outputPeak: outs.map(\.0), outputRMS: outs.map(\.1)))
+        // FX returns as if each had a FOH Meter plugin: a reverb sits lower and moves slower.
+        let fx = demoFXReturns.enumerated().map { i, strip -> (String, StripLevels) in
+            let channels = (0..<(strip.stereo ? 2 : 1)).map { level(-27, 0.6, Double(i) + Double($0) * 0.2) }
+            return (strip.id, StripLevels(peak: channels.map(\.0), rms: channels.map(\.1)))
+        }
+        update(MeterFrame(inputPeak: ins.map(\.0), inputRMS: ins.map(\.1), outputPeak: outs.map(\.0), outputRMS: outs.map(\.1),
+                          strips: Dictionary(uniqueKeysWithValues: fx)))
 
         guard let strip = demoRTAStrip else { return }
         if demoRTABands.count != RTAFrame.bandCenters.count { demoRTABands = Array(repeating: -60, count: RTAFrame.bandCenters.count) }

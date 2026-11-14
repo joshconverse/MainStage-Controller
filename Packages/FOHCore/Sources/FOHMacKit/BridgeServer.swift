@@ -33,6 +33,12 @@ public final class BridgeServer {
         public var portNameSuffix = ""
         public var enableMeters = true
         public var meterSourceFactory: () -> MeterSource = { AudioMetering.makeDefault() }
+        /// UDP port (127.0.0.1) for the FOH Meter plugin's readings. The app sets `FOHProtocol.pluginMeterPort`, the
+        /// one the plugin sends to; tests and test bridges leave it off or pick their own so they never take it.
+        public var pluginMeterPort: UInt16?
+        /// Run Tools/refresh-ipad.sh --if-due every 2 hours, once it's been enabled (`BridgeServer+IPadRefresh`). The app
+        /// turns it on; tests and fohctl leave it off.
+        public var renewsIPadApp = false
         /// Clients that send nothing (not even a ping) for this long are dropped.
         public var clientTimeout: TimeInterval = 10
         /// Called for every log line (fohctl prints them).
@@ -141,6 +147,10 @@ public final class BridgeServer {
     @ObservationIgnored var meterTimer: Timer?
     @ObservationIgnored var latestFrame: MeterFrame?
     @ObservationIgnored var frameDirty = false
+    @ObservationIgnored var pluginMeterReceiver: PluginMeterReceiver?
+    @ObservationIgnored var pluginMeterBank = PluginMeterBank()
+    /// Context name → what it resolved to when last logged, so each change is logged once.
+    @ObservationIgnored var pluginMeterLogged: [String: String] = [:]
     @ObservationIgnored var rtaOrder: [UUID] = []
     @ObservationIgnored var rtaActiveStrip: String?
     // Backups
@@ -164,6 +174,9 @@ public final class BridgeServer {
     @ObservationIgnored var concertChangeSeenAt: Date?
     @ObservationIgnored var concertRereading = false
     @ObservationIgnored var tickCount = 0
+    @ObservationIgnored var iPadRefreshRunning = false
+    /// Bumped after each refresh so the menu re-reads `iPadRefreshSummary`.
+    public internal(set) var iPadRefreshSummaryVersion = 0
 
     static let echoWindow: TimeInterval = 0.3
     /// A client-set value with no MainStage echo after this long is no longer "confirmed".
@@ -885,6 +898,7 @@ public final class BridgeServer {
         }
         expirePendingConfirmations()
         refreshMeterStatus()
+        iPadRefreshTick()
     }
 
     /// Client-set values MainStage never echoed are assumptions again; log the confirmed count when it changes.

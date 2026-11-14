@@ -2,11 +2,13 @@
 import Foundation
 import FOHCore
 
-// Meters and RTA (PLAN.md §2.5): the MeterSource reads the audio interface inputs and taps MainStage's output;
-// the bridge forwards frames to connected clients at ≤25 Hz and the RTA to whichever client asked for it.
+// Meters and RTA (PLAN.md §2.5): the MeterSource reads the audio interface inputs and taps MainStage's output, and
+// FOH Meter plugins inside MainStage send their strips' levels over UDP; the bridge forwards frames to connected
+// clients at ≤25 Hz and the RTA to whichever client asked for it.
 extension BridgeServer {
     func startMeters() {
         guard options.enableMeters, meterSource == nil else { return }
+        startPluginMeters()
         let source = options.meterSourceFactory()
         source.onFrame = { [weak self] frame in
             DispatchQueue.main.async {
@@ -35,6 +37,9 @@ extension BridgeServer {
     }
 
     func stopMeters() {
+        pluginMeterReceiver?.stop()
+        pluginMeterReceiver = nil
+        pluginMeterBank = PluginMeterBank()
         meterTimer?.invalidate()
         meterTimer = nil
         deviceWatcher?.stop()
@@ -45,10 +50,46 @@ extension BridgeServer {
 
     /// Send the latest frame if it changed and anyone is listening (≤25 Hz, coalesced).
     private func flushMeters() {
-        guard frameDirty, let frame = latestFrame else { return }
+        let strips = pluginMeterBank.levels(now: ProcessInfo.processInfo.systemUptime)
+        let live = show.strips.filter { strips[$0.id] != nil }.map(\.name)
+        if (status.pluginMeters ?? []) != live {
+            status.pluginMeters = live.isEmpty ? nil : live
+            frameDirty = true   // a meter that went away is cleared on the iPad
+            refreshStatus(broadcast: true)
+        }
+        guard frameDirty else { return }
         frameDirty = false
         guard !connections.isEmpty else { return }
+        var frame = latestFrame ?? MeterFrame()
+        frame.strips = strips
         broadcast(.message(OSCMessage(FOHProtocol.Path.meters, [.blob(frame.encoded())])))
+    }
+
+    // MARK: FOH Meter plugin
+
+    private func startPluginMeters() {
+        guard let port = options.pluginMeterPort, pluginMeterReceiver == nil else { return }
+        do {
+            pluginMeterReceiver = try PluginMeterReceiver(port: port, queue: .main) { [weak self] packet in
+                self?.receivePluginMeter(packet)
+            }
+            log("FOH Meter plugin: listening on 127.0.0.1 UDP \(port)")
+        } catch {
+            log("⚠︎ FOH Meter plugin: can't listen — \(error)")
+        }
+    }
+
+    /// Main thread (the receiver's queue).
+    func receivePluginMeter(_ packet: PluginMeterPacket) {
+        let strip = show.stripForPluginMeter(contextName: packet.contextName)
+        pluginMeterBank.add(packet, stripKey: strip?.id, now: ProcessInfo.processInfo.systemUptime)
+        frameDirty = true
+        let resolution = strip.map { "→ \($0.name) (\(packet.peak.count) ch)" }
+            ?? "matches no strip: give the FOH strip or the MainStage channel strip that name"
+        if pluginMeterLogged[packet.contextName] != resolution {
+            pluginMeterLogged[packet.contextName] = resolution
+            log("FOH Meter on \"\(packet.contextName)\" \(resolution)")
+        }
     }
 
     /// One RTA stream at a time: the most recent subscriber's strip. Other subscribers to the same strip get it too.
